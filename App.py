@@ -1,89 +1,62 @@
 import streamlit as st
-import requests
-import tempfile
-import cv2
+import torch
+from diffusers import StableDiffusionPipeline
+import moviepy.editor as mp
 import os
+from PIL import Image
 
-# Function to generate image from text using OpenAI API
-def generate_image_from_text(api_key, prompt):
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/images/generations",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={"prompt": prompt, "n": 1, "size": "512x512"}
-        )
-        response.raise_for_status()  # Check for request errors
-        response_json = response.json()
-        image_url = response_json.get("data", [])[0].get("url", None)
-        
-        if image_url:
-            img_data = requests.get(image_url).content
-            img_path = tempfile.mktemp(suffix=".png")
-            with open(img_path, "wb") as img_file:
-                img_file.write(img_data)
-            return img_path
-        else:
-            st.error("No image URL found in the response.")
-            return None
-    except Exception as e:
-        st.error(f"Error generating image: {e}")
-        return None
+# Load Stable Diffusion model
+@st.cache_resource
+def load_model():
+    model = StableDiffusionPipeline.from_pretrained("CompVis/stable-diffusion-v1-4-original", torch_dtype=torch.float16)
+    model = model.to("cuda")
+    return model
 
-# Function to generate a video from the images
-def generate_video_from_images(image_paths, output_path, frame_rate=1):
-    try:
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for .mp4 video
-        video_writer = cv2.VideoWriter(output_path, fourcc, frame_rate, (512, 512))
+# Function to generate an image from the text prompt
+def generate_image(prompt, model):
+    image = model(prompt).images[0]
+    return image
 
-        for image_path in image_paths:
-            image = cv2.imread(image_path)
-            if image is None:
-                st.error(f"Error reading image: {image_path}")
-                return None
-            video_writer.write(image)
+# Function to create video from a series of images
+def create_video_from_images(image_paths, output_path, fps=24):
+    clips = []
+    for img_path in image_paths:
+        img_clip = mp.ImageClip(img_path).set_duration(1)  # each frame lasts 1 second
+        clips.append(img_clip)
+    video = mp.concatenate_videoclips(clips, method="compose")
+    video.write_videofile(output_path, fps=fps)
 
-        video_writer.release()
-        return output_path
-    except Exception as e:
-        st.error(f"Error creating video: {e}")
-        return None
+# Streamlit interface
+st.title("AI Video Generator from Text")
 
-# Streamlit UI to enter text
-st.sidebar.title("AI Video Generator")
+# Get user input for text prompt
+prompt = st.text_area("Enter your text description:")
+num_frames = st.number_input("Number of frames for the video:", min_value=1, max_value=50, value=10)
 
-# Ask user for the OpenAI API Key
-api_key = st.sidebar.text_input("Enter your OpenAI API Key", type="password")
+if st.button("Generate Video"):
+    if prompt.strip():
+        st.spinner("Generating images...")
 
-task = st.sidebar.radio("Select a task:", ["Generate Video from Text"])
+        # Load the model
+        model = load_model()
 
-if api_key:
-    if task == "Generate Video from Text":
-        st.subheader("🎬 Generate AI Video from Text:")
-        video_prompt = st.text_area("Enter your video description:", "")
+        # Generate images for video
+        image_paths = []
+        for i in range(num_frames):
+            # Generate each image
+            image = generate_image(prompt, model)
+            image_path = f"/tmp/{i}_{prompt.replace(' ', '_')}.png"
+            image.save(image_path)
+            image_paths.append(image_path)
 
-        if st.button("Generate Video"):
-            if video_prompt.strip():
-                with st.spinner("Generating video..."):
-                    # Generate 5 images for the video (you can increase the count for longer videos)
-                    image_paths = []
-                    for i in range(5):  # You can generate more images here
-                        img_path = generate_image_from_text(api_key, video_prompt)
-                        if img_path:
-                            image_paths.append(img_path)
+        # Create a video from the generated images
+        video_path = "/tmp/generated_video.mp4"
+        create_video_from_images(image_paths, video_path)
 
-                    if image_paths:
-                        # Create a video from the images
-                        video_path = tempfile.mktemp(suffix=".mp4")
-                        video_path = generate_video_from_images(image_paths, video_path)
+        # Display the video
+        st.success("Video Generated Successfully!")
+        st.video(video_path)
 
-                        if video_path:
-                            st.success("Video Generated Successfully!")
-                            st.video(video_path)
-                        else:
-                            st.error("Failed to generate video.")
-                    else:
-                        st.error("No images were generated.")
-            else:
-                st.warning("Please enter a video description.")
-else:
-    st.warning("Please enter your OpenAI API key.")
+        # Optionally, allow the user to download the video
+        with open(video_path, "rb") as video_file:
+            st.download_button("Download Video", video_file, file_name="generated_video.mp4", mime="video/mp4")
