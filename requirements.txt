@@ -1,8 +1,6 @@
-diffusers
-transformers
-accelerate
-torch
-opencv-python
-numpy
-Pillow
 streamlit
+torch
+diffusers
+huggingface-hub
+opencv-python
+Pillow
