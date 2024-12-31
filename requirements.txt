@@ -1,6 +1,8 @@
 streamlit
 torch
+transformers
 diffusers
 huggingface-hub
 opencv-python
 Pillow
+requests
