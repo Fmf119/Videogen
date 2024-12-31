@@ -1,6 +1,8 @@
-streamlit
-opencv-python-headless
-openai==0.28.0
+diffusers
+transformers
+accelerate
+torch
+opencv-python
 numpy
-requests
-ffmpeg-python
+Pillow
+streamlit
