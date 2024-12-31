@@ -4,6 +4,7 @@ from diffusers import StableDiffusionPipeline
 from PIL import Image
 import os
 import subprocess
+import openai
 
 # Load Stable Diffusion model
 @st.cache_resource
@@ -12,9 +13,17 @@ def load_model():
     model = model.to("cuda")  # Ensure GPU usage if available
     return model
 
-# Generate an image from a text prompt
-def generate_image(prompt, model):
+# Generate an image from a text prompt using OpenAI API key if provided
+def generate_image(prompt, model, openai_api_key):
     try:
+        # Authenticate with OpenAI API if key is provided
+        if openai_api_key:
+            openai.api_key = openai_api_key
+        else:
+            st.error("OpenAI API key is required for text generation.")
+            return None
+
+        # Use the Stable Diffusion model to generate the image
         image = model(prompt).images[0]
         return image
     except Exception as e:
@@ -42,6 +51,9 @@ def create_video_from_images(image_paths, output_path, fps=24):
 # Streamlit UI for the user
 st.title("AI Video Generator")
 
+# User input for the OpenAI API key
+openai_api_key = st.text_input("Enter your OpenAI API Key (if needed):")
+
 # User input for the video generation
 prompt = st.text_area("Enter your video description:")
 num_frames = st.number_input("Number of frames for the video:", min_value=1, max_value=50, value=10)
@@ -56,7 +68,7 @@ if st.button("Generate Video"):
         # Generate images based on the prompt
         image_paths = []
         for i in range(num_frames):
-            image = generate_image(prompt, model)
+            image = generate_image(prompt, model, openai_api_key)
             if image:
                 image_path = f"/tmp/{i}_{prompt.replace(' ', '_')}.png"
                 image.save(image_path)
