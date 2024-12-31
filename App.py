@@ -1,88 +1,68 @@
 import streamlit as st
-import openai
 import cv2
 import numpy as np
-import requests
-from pathlib import Path
+from diffusers import StableDiffusionPipeline
+from PIL import Image
+import os
 
-# Function to download image from URL
-def download_image(image_url):
-    response = requests.get(image_url)
-    if response.status_code == 200:
-        image_array = np.asarray(bytearray(response.content), dtype=np.uint8)
-        return cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-    else:
-        raise Exception(f"Failed to download image: {response.status_code}")
+# Initialize Hugging Face Model
+@st.cache_resource
+def load_model():
+    return StableDiffusionPipeline.from_pretrained(
+        "CompVis/stable-diffusion-v1-4",
+        torch_dtype="float16",
+        use_auth_token=True  # Replace with your Hugging Face token if needed
+    ).to("cuda" if torch.cuda.is_available() else "cpu")
 
-# Function to create a single frame
-def generate_frame(prompt, frame_number):
-    try:
-        response = openai.Image.create(
-            prompt=f"{prompt} - frame {frame_number}",
-            n=1,
-            size="512x512"
-        )
-        image_url = response["data"][0]["url"]
-        frame = download_image(image_url)
-        return frame
-    except Exception as e:
-        st.error(f"Error generating frame {frame_number}: {e}")
-        return None
+# Generate Frames
+def generate_frames(prompt, model, num_frames=100):
+    frames = []
+    for i in range(num_frames):
+        try:
+            image = model(prompt).images[0]
+            frames.append(np.array(image))
+        except Exception as e:
+            st.error(f"Error generating frame {i+1}: {e}")
+            break
+    return frames
 
-# Function to stitch frames into a video
-def create_video_from_frames(frames, output_path, fps=10):
+# Convert Frames to Video
+def create_video(frames, output_path, fps=10):
     height, width, _ = frames[0].shape
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     video = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
     for frame in frames:
-        video.write(frame)
+        video.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
     video.release()
 
-# Streamlit App Layout
-st.title("AI Video Generator with OpenAI")
-st.sidebar.title("Options")
+# Streamlit App
+st.title("AI Video Generator with Hugging Face")
 
-# Allow users to input their OpenAI API key
-st.sidebar.subheader("Enter OpenAI API Key")
-openai_key = st.sidebar.text_input("API Key", type="password")
+auth_token = st.text_input("Enter your Hugging Face Token", type="password")
+if auth_token:
+    st.success("Token set successfully!")
 
-if openai_key:
-    openai.api_key = openai_key
+prompt = st.text_area("Enter a text prompt for your video:")
 
-    # User Input for Video Generation
-    st.subheader("🎬 Generate a Video")
-    video_prompt = st.text_area("Enter your video description or theme:")
-    total_frames = st.number_input("Total Number of Frames", min_value=10, max_value=10000, value=200, step=10)
-    batch_size = st.number_input("Batch Size (frames per batch)", min_value=10, max_value=100, value=50, step=10)
-    fps = st.number_input("Frames per Second (FPS)", min_value=5, max_value=60, value=10, step=1)
+num_frames = st.slider("Number of frames", 10, 100, 30)
+fps = st.slider("Frames per second", 1, 30, 10)
 
-    if st.button("Generate Video"):
-        if video_prompt.strip():
-            st.info("Generating video frames in batches...")
-            frames = []
-            num_batches = total_frames // batch_size + (1 if total_frames % batch_size else 0)
-            for batch in range(num_batches):
-                st.info(f"Generating batch {batch + 1} of {num_batches}...")
-                for i in range(batch * batch_size, min((batch + 1) * batch_size, total_frames)):
-                    frame = generate_frame(video_prompt, i + 1)
-                    if frame is not None:
-                        frames.append(frame)
-                
-                # Save intermediate frames to free memory
-                temp_video_path = f"temp_batch_{batch + 1}.mp4"
-                if frames:
-                    st.info(f"Stitching batch {batch + 1} into a temporary video...")
-                    create_video_from_frames(frames, temp_video_path, fps)
-                    st.video(temp_video_path)
-                frames.clear()  # Clear frames to free memory
+if st.button("Generate Video"):
+    if not prompt.strip():
+        st.warning("Please enter a valid text prompt.")
+    else:
+        with st.spinner("Loading model..."):
+            model = load_model()
 
-            # Combine temporary videos into a final video
-            st.info("Combining all batches into the final video...")
-            final_video_path = "output_video.mp4"
-            os.system(f"ffmpeg -f concat -safe 0 -i <(for f in temp_batch_*.mp4; do echo file $f; done) -c copy {final_video_path}")
-            st.success("Video Generated Successfully!")
-            st.video(final_video_path)
+        with st.spinner("Generating frames..."):
+            frames = generate_frames(prompt, model, num_frames)
+
+        if frames:
+            output_path = "generated_video.mp4"
+            with st.spinner("Creating video..."):
+                create_video(frames, output_path, fps)
+            st.success("Video generated successfully!")
+            st.video(output_path)
         else:
-            st.warning("Please enter a video description.")
-else:
-    st.warning("Please enter your OpenAI API key to use this feature.")
+            st.error("Video generation failed.")
