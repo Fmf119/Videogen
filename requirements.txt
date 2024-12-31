@@ -1,6 +1,6 @@
 streamlit
 opencv-python-headless
-openai
+openai==0.28.0
 numpy
 requests
 ffmpeg-python
