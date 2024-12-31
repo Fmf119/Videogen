@@ -1,19 +1,29 @@
+import cv2
+import numpy as np
 import streamlit as st
-from moviepy.editor import VideoFileClip
 import os
 
 # Set up the sidebar for input
 st.sidebar.title("AI Video Generator")
 task = st.sidebar.radio("Select a task:", ["Generate Video", "Upload and Process Video"])
 
-# Function to handle video generation (this is a placeholder; integrate your AI model here)
+# Function to handle video generation (placeholder logic here)
 def generate_video(prompt):
     try:
         generated_video_path = "/tmp/generated_video.mp4"
-        # Placeholder logic: Here, integrate your video generation AI model
+        # Placeholder logic: Here, integrate your AI model
         if os.path.exists("sample_input_video.mp4"):
-            clip = VideoFileClip("sample_input_video.mp4").subclip(0, 10)
-            clip.write_videofile(generated_video_path)
+            input_video = cv2.VideoCapture("sample_input_video.mp4")
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(generated_video_path, fourcc, 30, (640, 480))
+            while input_video.isOpened():
+                ret, frame = input_video.read()
+                if ret:
+                    out.write(frame)
+                else:
+                    break
+            input_video.release()
+            out.release()
             return generated_video_path
         else:
             st.error("Sample input video not found.")
@@ -30,7 +40,7 @@ if task == "Generate Video":
     if st.button("Generate Video"):
         if video_prompt.strip():
             with st.spinner("Generating video..."):
-                video_path = generate_video(video_prompt)  # Integrate with your AI model
+                video_path = generate_video(video_prompt)
                 if video_path:
                     st.success("Video Generated Successfully!")
                     st.video(video_path)
@@ -57,9 +67,19 @@ elif task == "Upload and Process Video":
         if process_button:
             st.spinner("Processing video...")
             try:
-                video_clip = VideoFileClip(video_path)
-                processed_clip = video_clip.subclip(0, 5)  # Just an example of video manipulation
-                processed_clip.write_videofile("/tmp/processed_video.mp4")
+                input_video = cv2.VideoCapture(video_path)
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                out = cv2.VideoWriter("/tmp/processed_video.mp4", fourcc, 30, (640, 480))
+                while input_video.isOpened():
+                    ret, frame = input_video.read()
+                    if ret:
+                        # Just an example: applying a simple effect like flipping the video
+                        frame = cv2.flip(frame, 0)
+                        out.write(frame)
+                    else:
+                        break
+                input_video.release()
+                out.release()
                 st.success("Video processed successfully!")
                 st.video("/tmp/processed_video.mp4")
             except Exception as e:
