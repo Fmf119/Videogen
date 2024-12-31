@@ -1,89 +1,69 @@
-import streamlit as st
-import torch
-from diffusers import StableDiffusionPipeline
-from PIL import Image
-import os
-import subprocess
 import openai
+import streamlit as st
+import cv2
+import os
+import numpy as np
+from PIL import Image
+from io import BytesIO
 
-# Load Stable Diffusion model
-@st.cache_resource
-def load_model():
-    model = StableDiffusionPipeline.from_pretrained("CompVis/stable-diffusion-v1-4-original", torch_dtype=torch.float16)
-    model = model.to("cuda")  # Ensure GPU usage if available
-    return model
+# Set OpenAI API key (can also take from user input)
+openai.api_key = st.text_input("Enter your OpenAI API Key:")
 
-# Generate an image from a text prompt using OpenAI API key if provided
-def generate_image(prompt, model, openai_api_key):
-    try:
-        # Authenticate with OpenAI API if key is provided
-        if openai_api_key:
-            openai.api_key = openai_api_key
-        else:
-            st.error("OpenAI API key is required for text generation.")
-            return None
+# Function to generate text using GPT-4
+def generate_text(prompt):
+    response = openai.Completion.create(
+        model="text-davinci-003",  # Or GPT-4 if available
+        prompt=prompt,
+        max_tokens=150
+    )
+    return response['choices'][0]['text']
 
-        # Use the Stable Diffusion model to generate the image
-        image = model(prompt).images[0]
-        return image
-    except Exception as e:
-        st.error(f"Error generating image: {e}")
-        return None
+# Function to generate image from text using OpenAI's DALL-E
+def generate_image_from_text(text):
+    response = openai.Image.create(
+        prompt=text,
+        n=1,
+        size="1024x1024"
+    )
+    image_url = response['data'][0]['url']
+    img_data = BytesIO(requests.get(image_url).content)
+    img = Image.open(img_data)
+    return img
 
-# Function to create video from images using FFMPEG
-def create_video_from_images(image_paths, output_path, fps=24):
-    # Create an input file list for FFMPEG
-    input_file_list = "/tmp/images.txt"
-    with open(input_file_list, "w") as f:
-        for image_path in image_paths:
-            f.write(f"file '{image_path}'\n")
+# Function to stitch images into a video
+def create_video_from_images(image_list, output_file="output_video.mp4"):
+    frame_rate = 1  # 1 image per second
+    frame_size = (1024, 1024)  # Adjust according to image size
+    out = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*'mp4v'), frame_rate, frame_size)
     
-    # Run the FFMPEG command to create a video from the images
-    command = [
-        "ffmpeg", "-f", "concat", "-safe", "0", "-i", input_file_list, 
-        "-vsync", "vfr", "-pix_fmt", "yuv420p", output_path
-    ]
-    try:
-        subprocess.run(command, check=True)
-    except subprocess.CalledProcessError as e:
-        st.error(f"Error creating video: {e}")
+    for img in image_list:
+        frame = np.array(img)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR for OpenCV
+        out.write(frame)
+    
+    out.release()
+    return output_file
 
-# Streamlit UI for the user
+# Streamlit interface
 st.title("AI Video Generator")
 
-# User input for the OpenAI API key
-openai_api_key = st.text_input("Enter your OpenAI API Key (if needed):")
+# Take user input for video script
+script_input = st.text_area("Enter a script or description for your video:")
 
-# User input for the video generation
-prompt = st.text_area("Enter your video description:")
-num_frames = st.number_input("Number of frames for the video:", min_value=1, max_value=50, value=10)
-
-if st.button("Generate Video"):
-    if prompt.strip():
-        st.spinner("Generating images...")
-
-        # Load the model
-        model = load_model()
-
-        # Generate images based on the prompt
-        image_paths = []
-        for i in range(num_frames):
-            image = generate_image(prompt, model, openai_api_key)
-            if image:
-                image_path = f"/tmp/{i}_{prompt.replace(' ', '_')}.png"
-                image.save(image_path)
-                image_paths.append(image_path)
-
-        # Create video from images using FFMPEG
-        video_path = "/tmp/generated_video.mp4"
-        create_video_from_images(image_paths, video_path)
-
-        # Show the generated video
-        st.success("Video Generated Successfully!")
-        st.video(video_path)
-
-        # Allow users to download the video
-        with open(video_path, "rb") as video_file:
-            st.download_button("Download Video", video_file, file_name="generated_video.mp4", mime="video/mp4")
-    else:
-        st.warning("Please enter a prompt.")
+if script_input:
+    # Generate text based on user input (or use GPT-4 for more complex prompts)
+    generated_text = generate_text(script_input)
+    st.write("Generated Script: ", generated_text)
+    
+    # Generate images based on the generated script
+    image_list = []
+    for i in range(5):  # Let's say we want to generate 5 images for the video
+        image = generate_image_from_text(generated_text)
+        image_list.append(image)
+    
+    # Create the video from images
+    video_path = create_video_from_images(image_list)
+    st.success("Video generated successfully!")
+    
+    # Show the video
+    st.video(video_path)
