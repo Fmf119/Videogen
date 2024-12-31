@@ -3,3 +3,4 @@ opencv-python-headless
 openai
 numpy
 requests
+ffmpeg-python
