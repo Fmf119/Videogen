@@ -1,68 +1,94 @@
 import streamlit as st
-import cv2
-import numpy as np
+from huggingface_hub import login
 from diffusers import StableDiffusionPipeline
+import torch
 from PIL import Image
+import cv2
 import os
 
-# Initialize Hugging Face Model
-@st.cache_resource
-def load_model():
-    return StableDiffusionPipeline.from_pretrained(
-        "CompVis/stable-diffusion-v1-4",
-        torch_dtype="float16",
-        use_auth_token=True  # Replace with your Hugging Face token if needed
-    ).to("cuda" if torch.cuda.is_available() else "cpu")
+# Set up the sidebar for input
+st.sidebar.title("AI Video Generator")
+task = st.sidebar.radio("Select a task:", ["Generate Video", "Upload and Process Video"])
 
-# Generate Frames
-def generate_frames(prompt, model, num_frames=100):
-    frames = []
-    for i in range(num_frames):
+# Allow user to enter their Hugging Face API token
+huggingface_token = st.sidebar.text_input("Enter your Hugging Face API Token (if using Hugging Face models):", type="password")
+
+# Function to log in to Hugging Face with the token
+def login_to_huggingface(token):
+    try:
+        if token:
+            login(token)
+            st.success("Successfully logged into Hugging Face!")
+        else:
+            st.warning("Please enter your Hugging Face token.")
+    except Exception as e:
+        st.error(f"Failed to log in to Hugging Face: {e}")
+
+# If Hugging Face token is provided, authenticate
+if huggingface_token:
+    login_to_huggingface(huggingface_token)
+
+# Function to generate image from text using Stable Diffusion
+def generate_image_from_prompt(prompt):
+    model_id = "CompVis/stable-diffusion-v1-4"
+    
+    if huggingface_token:
+        pipe = StableDiffusionPipeline.from_pretrained(model_id, use_auth_token=huggingface_token, torch_dtype=torch.float16)
+        pipe = pipe.to("cuda" if torch.cuda.is_available() else "cpu")
+
         try:
-            image = model(prompt).images[0]
-            frames.append(np.array(image))
+            # Generate the image
+            image = pipe(prompt).images[0]
+            output_path = "/tmp/generated_image.png"
+            image.save(output_path)
+            return output_path
         except Exception as e:
-            st.error(f"Error generating frame {i+1}: {e}")
-            break
-    return frames
+            st.error(f"Error generating image: {e}")
+            return None
+    else:
+        st.warning("Hugging Face token is required to generate the image.")
+        return None
 
-# Convert Frames to Video
-def create_video(frames, output_path, fps=10):
-    height, width, _ = frames[0].shape
+# Function to create video from generated images
+def create_video_from_images(image_paths, output_path="output_video.mp4", fps=10):
+    if not image_paths:
+        st.error("No images to generate video.")
+        return
+    
+    frame = cv2.imread(image_paths[0])
+    height, width, layers = frame.shape
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     video = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
-    for frame in frames:
-        video.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+    for image_path in image_paths:
+        frame = cv2.imread(image_path)
+        video.write(frame)
+
     video.release()
+    st.success(f"Video generated successfully: {output_path}")
+    return output_path
 
-# Streamlit App
-st.title("AI Video Generator with Hugging Face")
+# User Input and Video Generation
+if task == "Generate Video":
+    st.subheader("🎬 Generate AI Video:")
+    video_prompt = st.text_area("Enter your video description:", "")
+    num_frames = st.slider("Select the number of frames", 1, 100, 10)  # Let user select number of frames
+    
+    if st.button("Generate Video"):
+        if video_prompt.strip():
+            with st.spinner("Generating video..."):
+                # Generate images for each frame
+                image_paths = []
+                for i in range(num_frames):
+                    image_path = generate_image_from_prompt(f"{video_prompt} - frame {i+1}")
+                    if image_path:
+                        image_paths.append(image_path)
 
-auth_token = st.text_input("Enter your Hugging Face Token", type="password")
-if auth_token:
-    st.success("Token set successfully!")
-
-prompt = st.text_area("Enter a text prompt for your video:")
-
-num_frames = st.slider("Number of frames", 10, 100, 30)
-fps = st.slider("Frames per second", 1, 30, 10)
-
-if st.button("Generate Video"):
-    if not prompt.strip():
-        st.warning("Please enter a valid text prompt.")
-    else:
-        with st.spinner("Loading model..."):
-            model = load_model()
-
-        with st.spinner("Generating frames..."):
-            frames = generate_frames(prompt, model, num_frames)
-
-        if frames:
-            output_path = "generated_video.mp4"
-            with st.spinner("Creating video..."):
-                create_video(frames, output_path, fps)
-            st.success("Video generated successfully!")
-            st.video(output_path)
+                # Create video from the generated images
+                if image_paths:
+                    video_path = create_video_from_images(image_paths)
+                    st.video(video_path)
+                else:
+                    st.error("Failed to generate video.")
         else:
-            st.error("Video generation failed.")
+            st.warning("Please enter a video description.")
