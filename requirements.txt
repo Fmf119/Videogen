@@ -1,6 +1,5 @@
-streamlit
-torch
-diffusers
-Pillow
-ffmpeg-python
 openai
+streamlit
+requests
+opencv-python-headless
+Pillow
