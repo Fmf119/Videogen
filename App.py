@@ -9,11 +9,15 @@ task = st.sidebar.radio("Select a task:", ["Generate Video", "Upload and Process
 # Function to handle video generation (this is a placeholder; integrate your AI model here)
 def generate_video(prompt):
     try:
-        generated_video_path = "generated_video.mp4"
+        generated_video_path = "/tmp/generated_video.mp4"
         # Placeholder logic: Here, integrate your video generation AI model
-        clip = VideoFileClip("sample_input_video.mp4").subclip(0, 10)
-        clip.write_videofile(generated_video_path)
-        return generated_video_path
+        if os.path.exists("sample_input_video.mp4"):
+            clip = VideoFileClip("sample_input_video.mp4").subclip(0, 10)
+            clip.write_videofile(generated_video_path)
+            return generated_video_path
+        else:
+            st.error("Sample input video not found.")
+            return None
     except Exception as e:
         st.error(f"Error generating video: {e}")
         return None
@@ -41,18 +45,22 @@ elif task == "Upload and Process Video":
     uploaded_video = st.file_uploader("Choose a video file...", type=["mp4", "mov", "avi"])
     
     if uploaded_video is not None:
-        with open("uploaded_video.mp4", "wb") as f:
+        video_path = os.path.join("/tmp", "uploaded_video.mp4")
+        with open(video_path, "wb") as f:
             f.write(uploaded_video.read())
         
         st.success("Video uploaded successfully!")
-        st.video("uploaded_video.mp4")
+        st.video(video_path)
         
         # Optional: Allow processing of uploaded video (e.g., trimming, effects)
         process_button = st.button("Process Video")
         if process_button:
             st.spinner("Processing video...")
-            video_clip = VideoFileClip("uploaded_video.mp4")
-            processed_clip = video_clip.subclip(0, 5)  # Just an example of video manipulation
-            processed_clip.write_videofile("processed_video.mp4")
-            st.success("Video processed successfully!")
-            st.video("processed_video.mp4")
+            try:
+                video_clip = VideoFileClip(video_path)
+                processed_clip = video_clip.subclip(0, 5)  # Just an example of video manipulation
+                processed_clip.write_videofile("/tmp/processed_video.mp4")
+                st.success("Video processed successfully!")
+                st.video("/tmp/processed_video.mp4")
+            except Exception as e:
+                st.error(f"Error processing video: {e}")
